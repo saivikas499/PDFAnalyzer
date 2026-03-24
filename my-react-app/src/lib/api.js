@@ -8,16 +8,30 @@ async function getAuthHeader() {
   }
 }
 
-export async function uploadPDF(file) {
+export async function uploadPDFWithProgress(file, onProgress, jobId) {
   const headers = await getAuthHeader()
+  const id = jobId || `job_${Date.now()}_${Math.random().toString(36).slice(2)}`
+
+  // Open SSE for this specific job
+  const eventSource = new EventSource(`/api/upload/progress/${id}`)
+
+  eventSource.onmessage = (e) => {
+    const data = JSON.parse(e.data)
+    if (onProgress) onProgress(data)
+    if (data.done || data.error) eventSource.close()
+  }
+
+  eventSource.onerror = () => eventSource.close()
+
   const formData = new FormData()
   formData.append('pdf', file)
 
   const res = await fetch('/api/upload', {
     method: 'POST',
-    headers,
+    headers: { ...headers, 'x-job-id': id },
     body: formData
   })
+
   return res.json()
 }
 

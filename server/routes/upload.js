@@ -12,92 +12,97 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
+// SSE progress endpoint
+router.get('/progress/:jobId', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders()
+
+  // Store the response object so upload route can write to it
+  global.progressClients = global.progressClients || {}
+  global.progressClients[req.params.jobId] = res
+
+  req.on('close', () => {
+    delete global.progressClients[req.params.jobId]
+  })
+})
+
+function sendProgress(jobId, data) {
+  const client = global.progressClients?.[jobId]
+  if (client) {
+    client.write(`data: ${JSON.stringify(data)}\n\n`)
+  }
+}
+
 router.post('/', upload.single('pdf'), async (req, res) => {
+  const file = req.file
+  const userId = req.headers['x-user-id']
+  const jobId = req.headers['x-job-id']
+
+  if (!file || !userId) {
+    return res.status(400).json({ error: 'Missing file or user ID' })
+  }
+
   try {
-    const file = req.file
-    const userId = req.headers['x-user-id']
-
-    if (!file || !userId) {
-      return res.status(400).json({ error: 'Missing file or user ID' })
-    }
-
-    console.log(`\n--- Upload started: ${file.originalname} ---`)
-
-    // 1. Upload PDF to Supabase storage
-    console.log('1. Uploading file to Supabase storage...')
+    sendProgress(jobId, { step: 1, message: 'Uploading file to storage...', percent: 5 })
     const storagePath = `${userId}/${Date.now()}_${file.originalname}`
     const { error: storageError } = await supabase.storage
       .from('pdfs')
       .upload(storagePath, file.buffer, { contentType: 'application/pdf' })
-
     if (storageError) throw storageError
-    console.log('   Storage upload done.')
 
-    // 2. Save document record to database
-    console.log('2. Saving document record to database...')
+    sendProgress(jobId, { step: 2, message: 'Saving document record...', percent: 10 })
     const { data: doc, error: docError } = await supabase
       .from('documents')
       .insert({ user_id: userId, file_name: file.originalname, storage_path: storagePath })
-      .select()
-      .single()
+      .select().single()
+    if (docError) throw docError
 
-    if (docError) {
-      console.error('   Document insert error:', docError)
-      throw docError
-    }
-    console.log(`   Document saved. ID: ${doc.id}`)
-
-    // 3. Extract text from PDF
-    console.log('3. Extracting text from PDF...')
+    sendProgress(jobId, { step: 3, message: 'Extracting text from PDF...', percent: 20 })
     const text = await extractText(file.buffer)
-    console.log(`   Extracted ${text.length} characters.`)
 
-    // 4. Split into chunks
-    console.log('4. Splitting text into chunks...')
+    sendProgress(jobId, { step: 4, message: 'Splitting into chunks...', percent: 30 })
     const chunks = chunkText(text)
-    console.log(`   Got ${chunks.length} chunks.`)
 
-    if (chunks.length === 0) {
-      throw new Error('No chunks were generated from this PDF.')
+    sendProgress(jobId, { step: 5, message: `Processing ${chunks.length} chunks...`, percent: 35, total: chunks.length })
+
+    // Batch embed chunks for speed
+    const BATCH_SIZE = 5
+    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+      const batch = chunks.slice(i, i + BATCH_SIZE)
+      const embeddings = await Promise.all(batch.map(chunk => getEmbedding(chunk)))
+      const rows = batch.map((content, j) => ({
+        document_id: doc.id,
+        content,
+        embedding: embeddings[j]
+      }))
+      const { error: chunkError } = await supabase.from('chunks').insert(rows)
+      if (chunkError) throw chunkError
+
+      const percent = 35 + Math.round(((i + batch.length) / chunks.length) * 60)
+      sendProgress(jobId, {
+        step: 5,
+        message: `Processed ${Math.min(i + BATCH_SIZE, chunks.length)} of ${chunks.length} chunks...`,
+        percent,
+        current: Math.min(i + BATCH_SIZE, chunks.length),
+        total: chunks.length
+      })
     }
 
-    // 5. Embed each chunk and store
-    console.log('5. Embedding chunks and saving to database...')
-    console.log('   (First run may take 2-5 min to download the AI model)')
+    sendProgress(jobId, { step: 6, message: 'Done!', percent: 100, documentId: doc.id, fileName: file.originalname })
 
-    for (let i = 0; i < chunks.length; i++) {
-      console.log(`   Processing chunk ${i + 1} of ${chunks.length}...`)
-
-      const embedding = await getEmbedding(chunks[i])
-      console.log(`   Embedding size: ${embedding.length}`)
-      console.log(`   Chunk preview: "${chunks[i].substring(0, 60)}..."`)
-
-      const { data, error: chunkError } = await supabase
-        .from('chunks')
-        .insert({
-          document_id: doc.id,
-          content: chunks[i],
-          embedding
-        })
-        .select()
-
-      if (chunkError) {
-        console.error(`   Chunk ${i + 1} insert error:`, chunkError)
-        throw chunkError
-      }
-
-      console.log(`   Chunk ${i + 1} saved successfully. DB id: ${data?.[0]?.id}`)
+    // Close SSE connection
+    const client = global.progressClients?.[jobId]
+    if (client) {
+      client.write(`data: ${JSON.stringify({ done: true })}\n\n`)
+      client.end()
     }
-
-    console.log('6. All done!')
-    console.log(`--- Upload complete: ${file.originalname} ---\n`)
 
     res.json({ success: true, documentId: doc.id, fileName: file.originalname })
-
   } catch (err) {
-    console.error('\n--- Upload error ---')
-    console.error('Message:', err.message)
-    console.error('Details:', err)
+    sendProgress(jobId, { error: err.message })
+    console.error('Upload error:', err)
     res.status(500).json({ error: err.message })
   }
 })
