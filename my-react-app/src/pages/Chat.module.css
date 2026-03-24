@@ -424,3 +424,19 @@
   color: var(--text-3);
   margin-top: 8px;
 }
+
+.clearBtn {
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.clearBtn:hover {
+  background: var(--danger-soft);
+  border-color: rgba(192,57,43,0.2);
+  color: var(--danger);
+}

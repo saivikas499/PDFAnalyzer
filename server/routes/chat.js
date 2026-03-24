@@ -21,12 +21,12 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Missing question or documentId' })
     }
 
-    // 1. Embed the question with query-optimized embedding
+    // 1. Embed question
     console.log('1. Embedding question...')
     const questionEmbedding = await getQueryEmbedding(question)
-    console.log(`   Embedding size: ${questionEmbedding.length}`)
+    console.log(`Embedding size: ${questionEmbedding.length}`)
 
-    // 2. Get chunks
+    // 2. Fetch chunks
     console.log('2. Searching for relevant chunks...')
     const { data: chunks, error } = await supabase.rpc('match_chunks', {
       query_embedding: questionEmbedding,
@@ -34,31 +34,67 @@ router.post('/', async (req, res) => {
       match_count: 8
     })
 
-    if (error) throw error
-
-    console.log(`   Found ${chunks?.length} chunks`)
-    console.log(`   Scores: ${chunks?.map(c => c.similarity.toFixed(3)).join(', ')}`)
-
-    if (!chunks || chunks.length === 0) {
-      return res.json({ answer: 'No relevant content found in the document.' })
+    if (error) {
+      console.error("Supabase error:", error)
+      return res.json({
+        answer: "⚠ Error retrieving document context from database"
+      })
     }
 
-    // 3. Filter by similarity threshold
+    console.log(`Found chunks: ${chunks?.length}`)
+
+    if (!chunks || chunks.length === 0) {
+      return res.json({
+        answer: "⚠ No relevant content found in the document"
+      })
+    }
+
+    // 3. Filter chunks
     const relevantChunks = chunks.filter(c => c.similarity > 0.15)
     const finalChunks = relevantChunks.length > 0
       ? relevantChunks.map(c => c.content)
       : chunks.slice(0, 4).map(c => c.content)
 
+    console.log(`Final chunks used: ${finalChunks.length}`)
+
     // 4. Ask AI
     console.log('3. Asking AI...')
-    const answer = await askClaude(question, finalChunks)
-    console.log(`   Answer: ${answer.substring(0, 100)}...`)
+
+    let answer = await askClaude(question, finalChunks)
+
+    // ✅ If AI already returned meaningful error → keep it
+    if (
+      answer.toLowerCase().includes("rate limit") ||
+      answer.toLowerCase().includes("token") ||
+      answer.toLowerCase().includes("api key") ||
+      answer.toLowerCase().includes("error")
+    ) {
+      console.warn("AI returned error message:", answer)
+    }
+
+    // ✅ Prevent empty response
+    if (!answer || answer.trim() === "") {
+      console.error("Empty AI response")
+      answer = "⚠ AI could not generate a response"
+    }
+
+    console.log(`Answer: ${answer.substring(0, 100)}...`)
     console.log('--- Done ---\n')
 
-    res.json({ answer })
+    return res.json({ answer })
+
   } catch (err) {
-    console.error('Chat error:', err)
-    res.status(500).json({ error: err.message })
+    console.error('Chat route error:', err)
+
+    let message = "⚠ Server error occurred"
+
+    if (err.message?.toLowerCase().includes("fetch")) {
+      message = "⚠ Network error while processing request"
+    } else if (err.message) {
+      message = `⚠ ${err.message}`
+    }
+
+    return res.status(500).json({ answer: message })
   }
 })
 

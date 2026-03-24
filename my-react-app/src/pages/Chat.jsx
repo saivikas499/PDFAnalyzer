@@ -45,6 +45,37 @@ export default function Chat() {
 }, [documentId])
 
 
+useEffect(() => {
+  const saved = localStorage.getItem(`chat_${documentId}`)
+
+  setChatMap(prev => ({
+    ...prev,
+    [documentId]: saved ? JSON.parse(saved) : []
+  }))
+}, [documentId])
+
+useEffect(() => {
+  if (messages.length === 0) {
+    localStorage.removeItem(`chat_${documentId}`)
+  } else {
+    localStorage.setItem(
+      `chat_${documentId}`,
+      JSON.stringify(messages)
+    )
+  }
+}, [messages, documentId])
+
+function clearChat() {
+  const confirmClear = window.confirm('Are you sure you want to clear this chat?')
+  if (!confirmClear) return
+
+  localStorage.removeItem(`chat_${documentId}`)
+  setChatMap(prev => ({
+  ...prev,
+  [documentId]: []
+}))
+}
+
   async function handleSend(text) {
   const question = (text || input).trim()
   if (!question || loading) return
@@ -133,6 +164,7 @@ export default function Chat() {
               <span className={styles.chatTitle}>{docName.replace('.pdf', '')}</span>
             </div>
             <div className={styles.chatHeaderRight}>
+               <button className={styles.clearBtn} onClick={clearChat}>Clear chat</button>
               <span className={styles.aiBadge}>AI Ready</span>
             </div>
           </div>

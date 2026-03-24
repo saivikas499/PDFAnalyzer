@@ -37,10 +37,41 @@ export async function uploadPDFWithProgress(file, onProgress, jobId) {
 
 export async function askQuestion(question, documentId) {
   const headers = await getAuthHeader()
-  const res = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, documentId })
-  })
-  return res.json()
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, documentId })
+    })
+
+    // 🔥 Read as text first (important)
+    const text = await res.text()
+
+    // 🔥 Handle empty response
+    if (!text) {
+      console.error("Empty response from server")
+      return { error: "Empty response from server" }
+    }
+
+    let data
+
+    try {
+      data = JSON.parse(text)
+    } catch (err) {
+      console.error("Invalid JSON:", text)
+      return { error: "Invalid response from server" }
+    }
+
+    // 🔥 Handle HTTP errors
+    if (!res.ok) {
+      return { error: data.error || "Request failed" }
+    }
+
+    return data
+
+  } catch (err) {
+    console.error("Fetch error:", err)
+    return { error: err.message }
+  }
 }
