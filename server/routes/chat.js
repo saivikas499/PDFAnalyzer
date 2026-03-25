@@ -31,7 +31,7 @@ router.post('/', async (req, res) => {
     const { data: chunks, error } = await supabase.rpc('match_chunks', {
       query_embedding: questionEmbedding,
       doc_id: documentId,
-      match_count: 8
+      match_count: 4
     })
 
     if (error) {
@@ -49,14 +49,19 @@ router.post('/', async (req, res) => {
       })
     }
 
-    // 3. Filter chunks
-    const relevantChunks = chunks.filter(c => c.similarity > 0.15)
-    const finalChunks = relevantChunks.length > 0
-      ? relevantChunks.map(c => c.content)
-      : chunks.slice(0, 4).map(c => c.content)
+    // 3. Filter + rank + limit chunks (TOKEN SAFE)
+      const relevantChunks = chunks.filter(c => c.similarity > 0.15)
 
-    console.log(`Final chunks used: ${finalChunks.length}`)
+      // Sort by highest similarity
+      const sortedChunks = (relevantChunks.length > 0 ? relevantChunks : chunks)
+        .sort((a, b) => b.similarity - a.similarity)
 
+      // Take TOP 3 most relevant chunks only
+      const finalChunks = sortedChunks
+        .slice(0, 3)
+        .map(c => c.content.slice(0, 500)) // limit size per chunk
+
+      console.log(`Final chunks used: ${finalChunks.length}`)
     // 4. Ask AI
     console.log('3. Asking AI...')
 

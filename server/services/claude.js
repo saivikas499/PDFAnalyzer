@@ -2,8 +2,11 @@
 
 export async function askClaude(question, contextChunks) {
   const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
-
-  const context = contextChunks.join('\n\n---\n\n')
+  const MAX_CONTEXT_LENGTH = 2000
+  const context = contextChunks.slice(0, 4).join('\n\n---\n\n')
+  if (context.length > MAX_CONTEXT_LENGTH) {
+  context = context.slice(0, MAX_CONTEXT_LENGTH)
+  }
 
   try {
     const response = await groq.chat.completions.create({
