@@ -6,7 +6,7 @@ import chatRouter from './routes/chat.js'
 
 const app = express()
 
-app.use(cors({ origin: 'https://pdfprocessing.netlify.app' }))
+app.use(cors({ origin: 'https://pdfprocessing.netlify.app', credentials: true }))
 app.use(express.json())
 
 app.use('/api/upload', uploadRouter)

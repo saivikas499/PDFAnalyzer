@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient'
-
+const BASE_URL = import.meta.env.VITE_API_URL
 async function getAuthHeader() {
   const { data: { session } } = await supabase.auth.getSession()
   return {
@@ -13,7 +13,7 @@ export async function uploadPDFWithProgress(file, onProgress, jobId) {
   const id = jobId || `job_${Date.now()}_${Math.random().toString(36).slice(2)}`
 
   // Open SSE for this specific job
-  const eventSource = new EventSource(`/api/upload/progress/${id}`)
+  const eventSource = new EventSource(`${BASE_URL}/api/upload/progress/${id}`)
 
   eventSource.onmessage = (e) => {
     const data = JSON.parse(e.data)
@@ -26,7 +26,7 @@ export async function uploadPDFWithProgress(file, onProgress, jobId) {
   const formData = new FormData()
   formData.append('pdf', file)
 
-  const res = await fetch('/api/upload', {
+  const res = await fetch(`${BASE_URL}/api/upload`, {
     method: 'POST',
     headers: { ...headers, 'x-job-id': id },
     body: formData
@@ -39,7 +39,7 @@ export async function askQuestion(question, documentId) {
   const headers = await getAuthHeader()
 
   try {
-    const res = await fetch('/api/chat', {
+    const res = await fetch(`${BASE_URL}/api/chat`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ question, documentId })
